@@ -1,0 +1,159 @@
+
+services:
+  # =========================
+  # POSTGRESQL AUTH
+  # =========================
+  postgres-auth:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Mot de passe requis}
+      POSTGRES_DB: applyflow_auth
+    volumes:
+      - auth_data:/var/lib/postgresql/data
+      - ./services/auth-service/sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d applyflow_auth"]
+      interval: 5s
+      retries: 10
+
+  # =========================
+  # POSTGRESQL APPLICATIONS
+  # =========================
+  postgres-app:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Mot de passe requis}
+      POSTGRES_DB: applyflow_applications
+    volumes:
+      - application_data:/var/lib/postgresql/data
+      - ./services/application-service/sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d applyflow_applications"]
+      interval: 5s
+      retries: 10
+
+  # =========================
+  # REDIS
+  # =========================
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  # =========================
+  # RABBITMQ
+  # =========================
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      retries: 12
+
+  # =========================
+  # AUTH SERVICE
+  # =========================
+  auth-service:
+    build: ./services/auth-service
+    ports:
+      - "127.0.0.1:3001:3001"
+    environment:
+      DB_HOST: postgres-auth
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: applyflow_auth
+      JWT_SECRET: ${JWT_SECRET:?Secret JWT requis}
+      JWT_EXPIRATION: 1h
+      PORT: 3001
+      FRONTEND_ORIGIN: http://localhost:5173
+    depends_on:
+      postgres-auth:
+        condition: service_healthy
+
+  # =========================
+  # APPLICATION SERVICE
+  # =========================
+  application-service:
+    build: ./services/application-service
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      DB_HOST: postgres-app
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: applyflow_applications
+      JWT_SECRET: ${JWT_SECRET}
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://rabbitmq:5672
+      FRONTEND_ORIGIN: http://localhost:5173
+    depends_on:
+      postgres-app:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+
+  # =========================
+  # NOTIFICATION SERVICE
+  # =========================
+  notification-service:
+    build: ./services/notification-service
+    ports:
+      - "127.0.0.1:3002:3002"
+    environment: &notification-env
+      DB_HOST: postgres-app
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: applyflow_applications
+      JWT_SECRET: ${JWT_SECRET}
+      RABBITMQ_URL: amqp://rabbitmq:5672
+      PORT: 3002
+      FRONTEND_ORIGIN: http://localhost:5173
+    depends_on:
+      postgres-app:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # =========================
+  # RABBITMQ CONSUMER
+  # =========================
+  notification-consumer:
+    build: ./services/notification-service
+    restart: unless-stopped
+    command: ["node", "src/consumer.js"]
+    environment: *notification-env
+    depends_on:
+      postgres-app:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  follow-up-scheduler:
+    build: ./services/application-service
+    restart: unless-stopped
+    command: ["node", "src/jobs/followUpScheduler.js"]
+    environment:
+      DB_HOST: postgres-app
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: applyflow_applications
+      RABBITMQ_URL: amqp://rabbitmq:5672
+    depends_on:
+      postgres-app:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+volumes:
+  auth_data:
+  application_data:

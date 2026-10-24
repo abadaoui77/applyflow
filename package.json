@@ -1,0 +1,27 @@
+
+{
+  "name": "applyflow",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ApplyFlow - Application de suivi des candidatures",
+  "type": "module",
+  "scripts": {
+    "dev": "npm run docker:up && npm run dev:frontend",
+    "dev:frontend": "npm --prefix frontend run dev",
+
+    "docker:up": "docker compose --env-file .env.docker up -d",
+    "docker:build": "docker compose --env-file .env.docker up --build -d",
+    "docker:down": "docker compose --env-file .env.docker down",
+    "docker:ps": "docker compose --env-file .env.docker ps",
+    "docker:logs": "docker compose --env-file .env.docker logs --tail=50",
+
+    "test": "node --test tests/api.test.js",
+    "lint": "npm --prefix frontend run lint",
+    "build": "npm --prefix frontend run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/abadaoui77/applyflow.git"
+  },
+  "license": "ISC"
+}
